@@ -32,7 +32,7 @@ type LoggerConfig struct {
 }
 
 func Load() (*Config, error) {
-	_ = godotenv.Load(".env")
+	_ = godotenv.Load()
 
 	var cfg Config
 
