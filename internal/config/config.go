@@ -1,63 +1,72 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"time"
 
 	"github.com/joho/godotenv"
 )
 
-var EnvVars = struct {
-	Port         string
-	DatabaseURL  string
-	ReadTimeout  string
-	WriteTimeout string
-	IdleTimeout  string
-}{
-	Port:         "PORT",
-	DatabaseURL:  "DATABASE_URL",
-	ReadTimeout:  "READ_TIMEOUT",
-	WriteTimeout: "WRITE_TIMEOUT",
-	IdleTimeout:  "IDLE_TIMEOUT",
-}
-
 type Config struct {
 	Port        string
 	DatabaseURL string
 
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
-	IdleTimeout  time.Duration
+	ReadTimeout     time.Duration
+	WriteTimeout    time.Duration
+	IdleTimeout     time.Duration
+	ShutdownTimeout time.Duration
+
+	LogLevel string
+
+	AdminToken string
+	UserToken  string
 }
 
-func Load() *Config {
+func Load() (*Config, error) {
+	// Для локальной разработки: грузим .env, но не падаем, если его нет.
 	_ = godotenv.Load()
 
-	return &Config{
-		Port:        getEnv(EnvVars.Port, "8080"),
-		DatabaseURL: getEnv(EnvVars.DatabaseURL, ""),
-
-		ReadTimeout:  parseDuration(EnvVars.ReadTimeout, 15*time.Second),
-		WriteTimeout: parseDuration(EnvVars.WriteTimeout, 15*time.Second),
-		IdleTimeout:  parseDuration(EnvVars.IdleTimeout, 60*time.Second),
+	cfg := &Config{
+		Port:            getEnv("PORT", "8080"),
+		DatabaseURL:     getEnv("DATABASE_URL", ""),
+		ReadTimeout:     parseDuration("READ_TIMEOUT", 5*time.Second),
+		WriteTimeout:    parseDuration("WRITE_TIMEOUT", 10*time.Second),
+		IdleTimeout:     parseDuration("IDLE_TIMEOUT", 60*time.Second),
+		ShutdownTimeout: parseDuration("SHUTDOWN_TIMEOUT", 10*time.Second),
+		LogLevel:        getEnv("LOG_LEVEL", "info"),
+		AdminToken:      getEnv("ADMIN_TOKEN", ""),
+		UserToken:       getEnv("USER_TOKEN", ""),
 	}
+
+	// Минимальная валидация — это уже бизнес-правила конфигурации
+	if cfg.DatabaseURL == "" {
+		return nil, fmt.Errorf("DATABASE_URL must be set")
+	}
+	if cfg.AdminToken == "" || cfg.UserToken == "" {
+		return nil, fmt.Errorf("ADMIN_TOKEN and USER_TOKEN must be set")
+	}
+
+	return cfg, nil
 }
 
-func getEnv(key string, defaultVal string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
+func getEnv(key, defaultVal string) string {
+	if v, ok := os.LookupEnv(key); ok {
+		return v
 	}
-
 	return defaultVal
 }
 
 func parseDuration(key string, defaultVal time.Duration) time.Duration {
-	if valueStr := getEnv(key, ""); valueStr != "" {
-		d, err := time.ParseDuration(valueStr)
-		if err != nil {
-			return defaultVal
-		}
-		return d
+	val := getEnv(key, "")
+	if val == "" {
+		return defaultVal
 	}
-	return defaultVal
+
+	d, err := time.ParseDuration(val)
+	if err != nil {
+		return defaultVal
+	}
+
+	return d
 }
