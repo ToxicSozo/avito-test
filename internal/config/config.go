@@ -34,12 +34,12 @@ func Load() *Config {
 	_ = godotenv.Load()
 
 	return &Config{
-		Port:        getEnv("PORT", "8080"),
-		DatabaseURL: getEnv("", ""),
+		Port:        getEnv(EnvVars.Port, "8080"),
+		DatabaseURL: getEnv(EnvVars.DatabaseURL, ""),
 
-		ReadTimeout:  parseDuration("", 15*time.Second),
-		WriteTimeout: parseDuration("", 15*time.Second),
-		IdleTimeout:  parseDuration("", 60*time.Second),
+		ReadTimeout:  parseDuration(EnvVars.ReadTimeout, 15*time.Second),
+		WriteTimeout: parseDuration(EnvVars.WriteTimeout, 15*time.Second),
+		IdleTimeout:  parseDuration(EnvVars.IdleTimeout, 60*time.Second),
 	}
 }
 

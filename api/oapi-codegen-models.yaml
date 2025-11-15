@@ -1,5 +1,0 @@
-package: models
-output: ../internal/models/models.gen.go
-
-generate:
-  models: true

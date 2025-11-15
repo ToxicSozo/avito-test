@@ -1,6 +1,0 @@
-package: server
-output: ../internal/server/server.gen.go
-
-generate:
-  chi-server: true
-  models: false
