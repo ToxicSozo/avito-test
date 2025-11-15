@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/ToxicSozo/avito-test/internal/api"
+	"github.com/ToxicSozo/avito-test/internal/app"
 	"github.com/ToxicSozo/avito-test/internal/config"
+	"github.com/ToxicSozo/avito-test/internal/logger"
 )
 
 func main() {
@@ -18,37 +18,13 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
-	var handlerImpl api.Unimplemented
-
-	router := api.Handler(handlerImpl)
-
-	srv := &http.Server{
-		Addr:         ":" + cfg.Port,
-		Handler:      router,
-		ReadTimeout:  cfg.ReadTimeout,
-		WriteTimeout: cfg.WriteTimeout,
-		IdleTimeout:  cfg.IdleTimeout,
-	}
+	logg := logger.New(cfg.LogLevel)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	go func() {
-		log.Printf("HTTP server listening on %s", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("listen and serve: %v", err)
-		}
-	}()
-
-	<-ctx.Done()
-	log.Println("shutdown signal received")
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
-	defer cancel()
-
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("server shutdown error: %v", err)
-	} else {
-		log.Println("server gracefully stopped")
+	if err := app.Run(ctx, cfg, logg); err != nil {
+		logg.Error("app run failed", "err", err)
+		os.Exit(1)
 	}
 }

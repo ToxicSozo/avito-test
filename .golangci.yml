@@ -1,0 +1,22 @@
+run:
+  timeout: 3m
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - gocyclo
+    - gofmt
+    - goimports
+    - staticcheck
+
+linters-settings:
+  gocyclo:
+    min-complexity: 15
+
+issues:
+  exclude-rules:
+    - linters:
+        - errcheck
+      text: "Close.*error check"
