@@ -9,10 +9,7 @@ import (
 )
 
 func main() {
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatalf("load config: %v", err)
-	}
+	cfg := config.Load()
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
