@@ -20,6 +20,7 @@ const (
 	PREXISTS    ErrorResponseErrorCode = "PR_EXISTS"
 	PRMERGED    ErrorResponseErrorCode = "PR_MERGED"
 	TEAMEXISTS  ErrorResponseErrorCode = "TEAM_EXISTS"
+	USEREXISTS  ErrorResponseErrorCode = "USER_EXISTS"
 )
 
 // Defines values for PullRequestStatus.
@@ -33,6 +34,19 @@ const (
 	PullRequestShortStatusMERGED PullRequestShortStatus = "MERGED"
 	PullRequestShortStatusOPEN   PullRequestShortStatus = "OPEN"
 )
+
+// AssignmentStat defines model for AssignmentStat.
+type AssignmentStat struct {
+	Assignments int    `json:"assignments"`
+	TeamName    string `json:"team_name"`
+	UserId      string `json:"user_id"`
+	Username    string `json:"username"`
+}
+
+// AssignmentStatsResponse defines model for AssignmentStatsResponse.
+type AssignmentStatsResponse struct {
+	Stats []AssignmentStat `json:"stats"`
+}
 
 // ErrorResponse defines model for ErrorResponse.
 type ErrorResponse struct {
@@ -116,6 +130,12 @@ type PostPullRequestReassignJSONBody struct {
 	PullRequestId string `json:"pull_request_id"`
 }
 
+// GetStatsAssignmentsParams defines parameters for GetStatsAssignments.
+type GetStatsAssignmentsParams struct {
+	// Limit ����?�?�?�?�? amount of rows to return
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // GetTeamGetParams defines parameters for GetTeamGet.
 type GetTeamGetParams struct {
 	// TeamName Уникальное имя команды
@@ -160,6 +180,9 @@ type ServerInterface interface {
 	// Переназначить конкретного ревьювера на другого из его команды
 	// (POST /pullRequest/reassign)
 	PostPullRequestReassign(w http.ResponseWriter, r *http.Request)
+	// �?�?�>��?�?�?�?��?�� �?�'���'��?�'���? �?�����?���ؐ�?���
+	// (GET /stats/assignments)
+	GetStatsAssignments(w http.ResponseWriter, r *http.Request, params GetStatsAssignmentsParams)
 	// Создать команду с участниками (создаёт/обновляет пользователей)
 	// (POST /team/add)
 	PostTeamAdd(w http.ResponseWriter, r *http.Request)
@@ -193,6 +216,12 @@ func (_ Unimplemented) PostPullRequestMerge(w http.ResponseWriter, r *http.Reque
 // Переназначить конкретного ревьювера на другого из его команды
 // (POST /pullRequest/reassign)
 func (_ Unimplemented) PostPullRequestReassign(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// �?�?�>��?�?�?�?��?�� �?�'���'��?�'���? �?�����?���ؐ�?���
+// (GET /stats/assignments)
+func (_ Unimplemented) GetStatsAssignments(w http.ResponseWriter, r *http.Request, params GetStatsAssignmentsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -262,6 +291,33 @@ func (siw *ServerInterfaceWrapper) PostPullRequestReassign(w http.ResponseWriter
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PostPullRequestReassign(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetStatsAssignments operation middleware
+func (siw *ServerInterfaceWrapper) GetStatsAssignments(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetStatsAssignmentsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetStatsAssignments(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -488,6 +544,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/pullRequest/reassign", wrapper.PostPullRequestReassign)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/stats/assignments", wrapper.GetStatsAssignments)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/team/add", wrapper.PostTeamAdd)

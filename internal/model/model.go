@@ -2,13 +2,11 @@ package model
 
 import "time"
 
-// Team aggregates all members.
 type Team struct {
 	Name    string
 	Members []User
 }
 
-// User describes a single engineer inside a team.
 type User struct {
 	ID       string
 	Username string
@@ -16,7 +14,6 @@ type User struct {
 	IsActive bool
 }
 
-// PullRequest mirrors storage record with reviewers already loaded.
 type PullRequest struct {
 	ID                string
 	Name              string
@@ -27,7 +24,6 @@ type PullRequest struct {
 	AssignedReviewers []string
 }
 
-// PullRequestShort keeps lightweight projection used in listing endpoints.
 type PullRequestShort struct {
 	ID       string
 	Name     string
@@ -35,7 +31,6 @@ type PullRequestShort struct {
 	Status   string
 }
 
-// AssignmentStat summarises reviewer assignment counts per user.
 type AssignmentStat struct {
 	UserID      string
 	Username    string

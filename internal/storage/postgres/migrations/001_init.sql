@@ -11,8 +11,6 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_users_team ON users(team_name);
-
 CREATE TABLE IF NOT EXISTS pull_requests (
     pull_request_id TEXT PRIMARY KEY,
     pull_request_name TEXT NOT NULL,
@@ -22,8 +20,6 @@ CREATE TABLE IF NOT EXISTS pull_requests (
     merged_at TIMESTAMPTZ
 );
 
-CREATE INDEX IF NOT EXISTS idx_pull_requests_author ON pull_requests(author_id);
-
 CREATE TABLE IF NOT EXISTS pull_request_reviewers (
     pull_request_id TEXT NOT NULL REFERENCES pull_requests(pull_request_id) ON DELETE CASCADE,
     reviewer_id TEXT NOT NULL REFERENCES users(user_id),
@@ -32,5 +28,3 @@ CREATE TABLE IF NOT EXISTS pull_request_reviewers (
     PRIMARY KEY (pull_request_id, position),
     UNIQUE (pull_request_id, reviewer_id)
 );
-
-CREATE INDEX IF NOT EXISTS idx_pr_reviewers_user ON pull_request_reviewers(reviewer_id);

@@ -16,15 +16,9 @@ type Config struct {
 	WriteTimeout    time.Duration
 	IdleTimeout     time.Duration
 	ShutdownTimeout time.Duration
-
-	LogLevel string
-
-	AdminToken string
-	UserToken  string
 }
 
 func Load() (*Config, error) {
-	// Для локальной разработки: грузим .env, но не падаем, если его нет.
 	_ = godotenv.Load()
 
 	cfg := &Config{
@@ -34,19 +28,11 @@ func Load() (*Config, error) {
 		WriteTimeout:    parseDuration("WRITE_TIMEOUT", 10*time.Second),
 		IdleTimeout:     parseDuration("IDLE_TIMEOUT", 60*time.Second),
 		ShutdownTimeout: parseDuration("SHUTDOWN_TIMEOUT", 10*time.Second),
-		LogLevel:        getEnv("LOG_LEVEL", "info"),
-		AdminToken:      getEnv("ADMIN_TOKEN", ""),
-		UserToken:       getEnv("USER_TOKEN", ""),
 	}
 
-	// Минимальная валидация — это уже бизнес-правила конфигурации
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL must be set")
 	}
-	if cfg.AdminToken == "" || cfg.UserToken == "" {
-		return nil, fmt.Errorf("ADMIN_TOKEN and USER_TOKEN must be set")
-	}
-
 	return cfg, nil
 }
 

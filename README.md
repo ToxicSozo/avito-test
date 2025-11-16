@@ -1,81 +1,47 @@
 # PR Reviewer Assignment Service
 
-Microservice that follows `internal/api/openapi.yaml`: it manages teams/users and automatically assigns reviewers to pull requests.
+Микросервис назначает до двух активных ревьюверов из команды автора Pull Request, поддерживает переназначение, фиксирует merge и позволяет смотреть списки/статистику назначений. HTTP-контракт полностью описан в `api/openapi.yaml` (OpenAPI 3.0.3).
 
-## Quick start
+## Быстрый старт
+1. Требования: Docker + docker-compose, make, свободный порт 8080. Для локального запуска без контейнера нужны Go 1.25 и PostgreSQL 16.
+2. Настройте окружение (пример в `.env`): `PORT`, `DATABASE_URL`, `READ_TIMEOUT`, `WRITE_TIMEOUT`, `IDLE_TIMEOUT`, `SHUTDOWN_TIMEOUT`, `LOG_LEVEL`.
+3. Полный цикл в контейнерах: `make compose-up` — собирает сервис, запускает PostgreSQL и приложение на `http://localhost:8080`, миграции применяются автоматически.
+4. Остановить: `make compose-down`.
+5. Локальный запуск без Docker: поднимите PostgreSQL, пропишите `DATABASE_URL`, затем `make run`.
 
-```bash
-docker-compose up --build
-```
-
-The HTTP API listens on `http://localhost:8080`, Postgres is available on `localhost:5432`. The app runs embedded SQL migrations from `internal/storage/postgres/migrations` on startup, so `docker-compose up` is enough.
-
-### Auth tokens
-
-Every call must provide `Authorization: Bearer <token>`.
-
-| Endpoint group | Token | Scope |
+## Возможности API
+| Метод и путь | Назначение | Ошибки |
 | --- | --- | --- |
-| `/team/add`, `/team/get`, `/users/setIsActive` | `ADMIN_TOKEN` | team/user management |
-| all other endpoints | `USER_TOKEN` or `ADMIN_TOKEN` | PR operations |
+| `POST /team/add` | Создать команду и upsert'ить участников (пользователя нельзя перенести в другую команду). | `TEAM_EXISTS`, `USER_EXISTS` |
+| `GET /team/get?team_name=` | Получить состав команды. | `NOT_FOUND` |
+| `POST /users/setIsActive` | Изменить флаг активности пользователя; неактивные не назначаются на ревью. | `NOT_FOUND` |
+| `POST /pullRequest/create` | Создать PR и назначить до двух случайных активных ревьюверов из команды автора (автор исключён). | `NOT_FOUND`, `PR_EXISTS` |
+| `POST /pullRequest/reassign` | Заменить конкретного ревьювера на активного участника его команды (исключая автора и уже назначенных). | `NOT_FOUND`, `NOT_ASSIGNED`, `NO_CANDIDATE`, `PR_MERGED` |
+| `POST /pullRequest/merge` | Пометить PR как MERGED (идемпотентно, после этого менять ревьюверов нельзя). | `NOT_FOUND` |
+| `GET /users/getReview?user_id=` | Список PR'ов, где пользователь назначен ревьювером. | `NOT_FOUND` |
+| `GET /stats/assignments?limit=` | Статистика назначений на пользователей (1..500, по умолчанию 50). | — |
 
-Override tokens through `.env` (used locally) or the environment when starting containers.
+Ошибки всегда в формате `{"error":{"code":"...", "message":"..."}}`, перечень кодов — `TEAM_EXISTS`, `USER_EXISTS`, `PR_EXISTS`, `PR_MERGED`, `NOT_ASSIGNED`, `NO_CANDIDATE`, `NOT_FOUND`.
 
-## Local development
+## Архитектура и стек
+- Go 1.25, chi-router, oapi-codegen и middleware валидации OpenAPI.
+- PostgreSQL 16 + GORM; миграции `internal/storage/postgres/migrations` применяются при старте.
+- Логирование JSON через logrus (уровень задаётся `LOG_LEVEL`).
+- Слои: transport/http (chi + кодоген шаблоны), domain/service с бизнес-правилами назначения и блокировками, storage/postgres с транзакциями и выборками кандидатов.
 
-Go 1.25+ is required.
+## Проверка качества
+- E2E (testcontainers, нужен запущенный Docker): `make test-e2e`.
+- Линтер (`golangci-lint` и `.golangci.yml`: таймаут 5 мин, включены errcheck, sqlclosecheck, govet, staticcheck, ineffassign, unused, dupl, gocyclo, goconst, nakedret, contextcheck; максимум 50 находок на линтер и до 3 повторов одной проблемы): `make lint`.
 
-```bash
-make build     # linux binary in bin/reviewer
-make run       # start the API locally (Postgres must be available)
-make test      # go test ./...
-make generate  # rebuild api.gen.go via oapi-codegen v2.5.1
-make lint      # golangci-lint (see .golangci.yml)
-```
+## Линтер
+- Конфигурация `.golangci.yml` включает проверки errcheck, sqlclosecheck, govet, staticcheck, ineffassign, unused, dupl, gocyclo, goconst, nakedret, contextcheck.
+- Таймаут запуска — 5 минут, lint прогоняет тестовые файлы (`tests: true`).
+- Ограничения на отчёт: не более 50 замечаний от каждого линтера и до трёх повторов одной и той же проблемы (настройки `max-issues-per-linter`, `max-same-issues`).
 
-Use the included `docker-compose.yml` or your own Postgres instance for local DB access.
+## Дополнительно
+- Примеры HTTP-запросов и curl-скриптов вынесены в `requests.md`.
+- Допущения: при нехватке активных кандидатов назначается доступное количество ревьюверов (0/1); после MERGED любые изменения состава ревьюверов запрещены; `POST /pullRequest/merge` идемпотентен и всегда возвращает актуальное состояние PR.
 
-## Architecture
-
-- `internal/storage/postgres` - pgx pool setup + embedded migrations.
-- `internal/service` - domain logic (team CRUD, PR creation, reviewer reassignment, idempotent merge).
-- `internal/server` - implementation of `api.ServerInterface`, performs Authorization header checks and marshals errors/responses.
-- `cmd/main.go` - config loading, chi router, graceful shutdown wiring.
-
-### Business rules
-
-1. PR creation assigns up to two random active teammates of the author (excluding the author). If less than two people are available we assign the exact number of candidates.
-2. Reassignment swaps a reviewer with a random active member of the replaced reviewer's team while skipping the author and already assigned reviewers.
-3. After MERGED the reviewer list becomes immutable; `POST /pullRequest/merge` is idempotent and always returns the latest state.
-4. Users with `is_active = false` never participate in reviewer selection.
-
-## Stats endpoint
-
-`GET /stats/assignments` (admin token) returns reviewer assignment counts ordered by the number of PRs a user currently reviews. Optional query parameter `limit` (default 50) caps result length. The endpoint sits outside the provided OpenAPI spec but follows the same auth mechanics.
-
-## Assumptions
-
-- Simple bearer-token auth documented here (not part of the OpenAPI file).
-- Team creation expects fresh `user_id`s; if the identifier already exists we respond with error code `USER_EXISTS`.
-- The target load from the task can be served by Postgres alone, so no caches were added.
-
-## Testing
-
-`make test` runs `go test ./...`. Before packaging the solution the binary was built (`make build`) and the Docker images were rebuilt via `docker-compose up --build`.
-
-Integration test `TestServiceIntegration_BusinessFlows` (package `internal/service`) uses Testcontainers to spin up PostgreSQL and validate the full reviewer workflow. Docker must be available locally; otherwise the test automatically skips itself.
-
-## Non-functional requirements & load test
-
-- Data volume: up to 20 teams, 200 users.
-- Target throughput: 5 RPS.
-- Response SLI: 99‑percentile under 300 ms.
-- Success SLI: ≥ 99.9%.
-
-Load profile is verified with k6:
-
-```bash
-BASE_URL=http://localhost:8080 USER_TOKEN=super-secret-user k6 run loadtest/load.js
-```
-
-The script enforces `p(99) < 300ms` and `<0.1%` failed requests via built-in thresholds; attach the k6 summary when sharing results.
+## Расхождения с исходным ТЗ
+- Добавлен необязательный эндпоинт статистики `GET /stats/assignments`, который упоминался в дополнительных заданиях, но отсутствовал в OpenAPI из ТЗ.
+- Введён код ошибки `USER_EXISTS`, чтобы явно запретить перенос существующего пользователя в другую команду при `POST /team/add` и сохранить консистентность данных.

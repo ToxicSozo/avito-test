@@ -6,49 +6,49 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
-// DB wraps pgx connection pool and migration runner.
 type DB struct {
-	pool *pgxpool.Pool
+	conn *gorm.DB
 }
 
-// New connects to Postgres, runs migrations and returns DB handle.
 func New(ctx context.Context, dsn string) (*DB, error) {
-	cfg, err := pgxpool.ParseConfig(dsn)
+	gormDB, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
 	if err != nil {
-		return nil, fmt.Errorf("parse postgres config: %w", err)
+		return nil, fmt.Errorf("init gorm postgres: %w", err)
 	}
 
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("init postgres pool: %w", err)
-	}
-
-	db := &DB{pool: pool}
-	if err := db.migrate(ctx); err != nil {
-		pool.Close()
+	if err := runMigrations(ctx, gormDB); err != nil {
+		sqlDB, dbErr := gormDB.DB()
+		if dbErr == nil {
+			_ = sqlDB.Close()
+		}
 		return nil, err
 	}
 
-	return db, nil
+	return &DB{conn: gormDB}, nil
 }
 
-// Pool exposes the underlying pgx pool.
-func (db *DB) Pool() *pgxpool.Pool {
-	return db.pool
+func (db *DB) Conn() *gorm.DB {
+	return db.conn
 }
 
-// Close releases all resources.
 func (db *DB) Close() {
-	db.pool.Close()
+	sqlDB, err := db.conn.DB()
+	if err == nil {
+		_ = sqlDB.Close()
+	}
 }
 
-func (db *DB) migrate(ctx context.Context) error {
+func runMigrations(ctx context.Context, gormDB *gorm.DB) error {
 	entries, err := migrationFiles.ReadDir("migrations")
 	if err != nil {
 		return fmt.Errorf("list migrations: %w", err)
@@ -66,7 +66,7 @@ func (db *DB) migrate(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", entry.Name(), err)
 		}
-		if _, err := db.pool.Exec(ctx, string(sqlBytes)); err != nil {
+		if err := gormDB.WithContext(ctx).Exec(string(sqlBytes)).Error; err != nil {
 			return fmt.Errorf("apply migration %s: %w", entry.Name(), err)
 		}
 	}

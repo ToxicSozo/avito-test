@@ -3,37 +3,41 @@ package app
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"time"
 
+	nethttpmiddleware "github.com/oapi-codegen/nethttp-middleware"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/sirupsen/logrus"
 
-	"github.com/ToxicSozo/avito-test/internal/api"
+	"github.com/ToxicSozo/avito-test/api"
 	"github.com/ToxicSozo/avito-test/internal/config"
-	"github.com/ToxicSozo/avito-test/internal/server"
-	"github.com/ToxicSozo/avito-test/internal/service"
+	"github.com/ToxicSozo/avito-test/internal/domain/service"
 	"github.com/ToxicSozo/avito-test/internal/storage/postgres"
+	httpHandlers "github.com/ToxicSozo/avito-test/internal/transport/http/handlers"
 )
 
-// Run wires dependencies, starts HTTP server and blocks until ctx cancellation.
-func Run(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
+func Run(ctx context.Context, cfg *config.Config, log *logrus.Logger) error {
 	db, err := postgres.New(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return fmt.Errorf("connect database: %w", err)
 	}
 	defer db.Close()
 
-	svc := service.New(db.Pool())
+	swagger, err := api.GetSwagger()
+	if err != nil {
+		return fmt.Errorf("load swagger: %w", err)
+	}
 
-	handlerImpl := server.NewHandler(
+	svc := service.New(db.Conn())
+
+	handlerImpl := httpHandlers.NewHandler(
 		svc,
 		svc,
 		svc,
-		log,
-		cfg.AdminToken,
-		cfg.UserToken,
+		log.WithField("component", "http"),
 	)
 
 	baseRouter := chi.NewRouter()
@@ -43,8 +47,8 @@ func Run(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 		middleware.Logger,
 		middleware.Recoverer,
 		middleware.Timeout(30*time.Second),
+		nethttpmiddleware.OapiRequestValidator(swagger),
 	)
-	baseRouter.Get("/stats/assignments", handlerImpl.GetAssignmentStats)
 
 	router := api.HandlerWithOptions(handlerImpl, api.ChiServerOptions{
 		BaseRouter: baseRouter,
@@ -60,7 +64,7 @@ func Run(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Info("HTTP server listening", "addr", srv.Addr)
+		log.WithField("addr", srv.Addr).Info("HTTP server listening")
 		if serveErr := srv.ListenAndServe(); serveErr != nil && serveErr != http.ErrServerClosed {
 			errCh <- serveErr
 		}
@@ -73,7 +77,7 @@ func Run(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 		return fmt.Errorf("listen and serve: %w", err)
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+	shutdownCtx, cancel := context.WithTimeout(ctx, cfg.ShutdownTimeout)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {

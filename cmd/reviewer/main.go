@@ -9,7 +9,7 @@ import (
 
 	"github.com/ToxicSozo/avito-test/internal/app"
 	"github.com/ToxicSozo/avito-test/internal/config"
-	"github.com/ToxicSozo/avito-test/internal/logger"
+	"github.com/ToxicSozo/avito-test/pkg/logger"
 )
 
 func main() {
@@ -18,13 +18,13 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
-	logg := logger.New(cfg.LogLevel)
+	logg := logger.New()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	if err := app.Run(ctx, cfg, logg); err != nil {
-		logg.Error("app run failed", "err", err)
+		logg.WithError(err).Error("app run failed")
 		os.Exit(1)
 	}
 }
