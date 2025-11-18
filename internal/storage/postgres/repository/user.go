@@ -4,64 +4,75 @@ import (
 	"context"
 	"errors"
 
-	"gorm.io/gorm"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/ToxicSozo/avito-test/internal/model"
 )
 
 func (s *Store) SetUserActivity(ctx context.Context, userID string, active bool) (*model.User, error) {
-	db := s.WithContext(ctx)
-
-	var user User
-	if err := db.Where("user_id = ?", userID).First(&user).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+	var user model.User
+	err := s.q.QueryRow(ctx, `
+		UPDATE users
+		SET is_active = $2
+		WHERE user_id = $1
+		RETURNING user_id, username, team_name, is_active
+	`, userID, active).Scan(&user.ID, &user.Username, &user.TeamName, &user.IsActive)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, err
 	}
-
-	user.IsActive = active
-	if err := db.Save(&user).Error; err != nil {
-		return nil, err
-	}
-	m := user.toModel()
-	return &m, nil
+	return &user, nil
 }
 
 func (s *Store) EnsureUserExists(ctx context.Context, userID string) error {
-	err := s.WithContext(ctx).First(&User{}, "user_id = ?", userID).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	var id string
+	err := s.q.QueryRow(ctx, `
+		SELECT user_id
+		FROM users
+		WHERE user_id = $1
+	`, userID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
 	return err
 }
 
 func (s *Store) FindTeamName(ctx context.Context, userID string) (string, error) {
-	var user User
-	err := s.WithContext(ctx).Select("team_name").First(&user, "user_id = ?", userID).Error
+	var teamName string
+	err := s.q.QueryRow(ctx, `
+		SELECT team_name
+		FROM users
+		WHERE user_id = $1
+	`, userID).Scan(&teamName)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return "", ErrNotFound
 		}
 		return "", err
 	}
-	return user.TeamName, nil
+	return teamName, nil
 }
 
 func (s *Store) PickReviewers(ctx context.Context, teamName, authorID string, limit int) ([]string, error) {
-	rows, err := s.WithContext(ctx).
-		Model(&User{}).
-		Select("user_id").
-		Where("team_name = ? AND is_active = ? AND user_id <> ?", teamName, true, authorID).
-		Order("random()").
-		Limit(limit).
-		Rows()
+	if limit <= 0 {
+		return nil, nil
+	}
+
+	rows, err := s.q.Query(ctx, `
+		SELECT user_id
+		FROM users
+		WHERE team_name = $1
+		  AND is_active = TRUE
+		  AND user_id <> $2
+		ORDER BY random()
+		LIMIT $3
+	`, teamName, authorID, limit)
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		_ = rows.Close()
-	}()
+	defer rows.Close()
 
 	var reviewers []string
 	for rows.Next() {
@@ -75,35 +86,25 @@ func (s *Store) PickReviewers(ctx context.Context, teamName, authorID string, li
 }
 
 func (s *Store) PickReplacement(ctx context.Context, teamName, oldReviewerID, prID, authorID string) (string, error) {
-	rows, err := s.WithContext(ctx).
-		Model(&User{}).
-		Select("user_id").
-		Where("team_name = ? AND is_active = ?", teamName, true).
-		Where("user_id NOT IN ?", []string{oldReviewerID, authorID}).
-		Where("user_id NOT IN (?)",
-			s.WithContext(ctx).Model(&PullRequestReviewer{}).
-				Select("reviewer_id").
-				Where("pull_request_id = ?", prID),
-		).
-		Order("random()").
-		Limit(1).
-		Rows()
+	var candidate string
+	err := s.q.QueryRow(ctx, `
+		SELECT user_id
+		FROM users
+		WHERE team_name = $1
+		  AND is_active = TRUE
+		  AND user_id <> $2
+		  AND user_id <> $4
+		  AND user_id NOT IN (
+			  SELECT reviewer_id FROM pull_request_reviewers WHERE pull_request_id = $3
+		  )
+		ORDER BY random()
+		LIMIT 1
+	`, teamName, oldReviewerID, prID, authorID).Scan(&candidate)
 	if err != nil {
-		return "", err
-	}
-	defer func() {
-		_ = rows.Close()
-	}()
-
-	if rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return "", err
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrNotFound
 		}
-		return id, nil
-	}
-	if err := rows.Err(); err != nil {
 		return "", err
 	}
-	return "", ErrNotFound
+	return candidate, nil
 }

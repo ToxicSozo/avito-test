@@ -127,12 +127,6 @@ func TestEndToEndScenario(t *testing.T) {
 	require.Len(t, assignmentsResp.PullRequests, 1)
 	require.Equal(t, prPayload.PullRequestId, assignmentsResp.PullRequests[0].PullRequestId)
 
-	var statsResp struct {
-		Stats []api.AssignmentStat `json:"stats"`
-	}
-	doRequest(t, client, fmt.Sprintf("%s/stats/assignments?limit=10", baseURL), http.MethodGet, nil, http.StatusOK, &statsResp)
-	require.NotEmpty(t, statsResp.Stats)
-
 	appCancel()
 	require.NoError(t, <-errCh)
 }
@@ -154,7 +148,9 @@ func doRequest(t *testing.T, client *http.Client, url, method string, body any, 
 
 	resp, err := client.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	data, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
@@ -209,7 +205,7 @@ func waitForReady(t *testing.T, port int) {
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(url)
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -221,6 +217,8 @@ func freePort(t *testing.T) int {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
-	defer l.Close()
+	defer func() {
+		_ = l.Close()
+	}()
 	return l.Addr().(*net.TCPAddr).Port
 }

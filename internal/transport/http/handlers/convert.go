@@ -120,18 +120,34 @@ func newReviewerAssignmentsResponse(userID string, prs []model.PullRequestShort)
 	}
 }
 
-func newAssignmentStatsResponse(stats []model.AssignmentStat) api.AssignmentStatsResponse {
-	result := make([]api.AssignmentStat, 0, len(stats))
-	for _, stat := range stats {
-		item := api.AssignmentStat{
-			UserId:   stat.UserID,
-			Username: stat.Username,
-			TeamName: stat.TeamName,
-		}
-		if stat.Assignments > 0 {
-			item.Assignments = int(stat.Assignments)
-		}
-		result = append(result, item)
+func toAPIAssignmentStats(stats *model.AssignmentStats) api.AssignmentStats {
+	resp := api.AssignmentStats{
+		ByUser:        []api.AssignmentCountByUser{},
+		ByPullRequest: []api.AssignmentCountByPullRequest{},
 	}
-	return api.AssignmentStatsResponse{Stats: result}
+	if stats == nil {
+		return resp
+	}
+
+	if len(stats.ByUser) > 0 {
+		resp.ByUser = make([]api.AssignmentCountByUser, 0, len(stats.ByUser))
+		for _, rec := range stats.ByUser {
+			resp.ByUser = append(resp.ByUser, api.AssignmentCountByUser{
+				UserId:      rec.UserID,
+				Assignments: rec.Assignments,
+			})
+		}
+	}
+
+	if len(stats.ByPullRequest) > 0 {
+		resp.ByPullRequest = make([]api.AssignmentCountByPullRequest, 0, len(stats.ByPullRequest))
+		for _, rec := range stats.ByPullRequest {
+			resp.ByPullRequest = append(resp.ByPullRequest, api.AssignmentCountByPullRequest{
+				PullRequestId: rec.PullRequestID,
+				Reviewers:     rec.Reviewers,
+			})
+		}
+	}
+
+	return resp
 }

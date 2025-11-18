@@ -31,9 +31,17 @@ type PullRequestShort struct {
 	Status   string
 }
 
-type AssignmentStat struct {
+type AssignmentCountByUser struct {
 	UserID      string
-	Username    string
-	TeamName    string
 	Assignments int64
+}
+
+type AssignmentCountByPullRequest struct {
+	PullRequestID string
+	Reviewers     int64
+}
+
+type AssignmentStats struct {
+	ByUser        []AssignmentCountByUser
+	ByPullRequest []AssignmentCountByPullRequest
 }

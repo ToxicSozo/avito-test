@@ -3,21 +3,20 @@ package repository
 import (
 	"context"
 
-	"gorm.io/gorm"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
+type Querier interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 type Store struct {
-	db *gorm.DB
+	q Querier
 }
 
-func New(db *gorm.DB) *Store {
-	return &Store{db: db}
-}
-
-func (s *Store) WithContext(ctx context.Context) *gorm.DB {
-	return s.db.WithContext(ctx)
-}
-
-func (s *Store) DB() *gorm.DB {
-	return s.db
+func New(q Querier) *Store {
+	return &Store{q: q}
 }

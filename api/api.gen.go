@@ -20,7 +20,6 @@ const (
 	PREXISTS    ErrorResponseErrorCode = "PR_EXISTS"
 	PRMERGED    ErrorResponseErrorCode = "PR_MERGED"
 	TEAMEXISTS  ErrorResponseErrorCode = "TEAM_EXISTS"
-	USEREXISTS  ErrorResponseErrorCode = "USER_EXISTS"
 )
 
 // Defines values for PullRequestStatus.
@@ -35,17 +34,22 @@ const (
 	PullRequestShortStatusOPEN   PullRequestShortStatus = "OPEN"
 )
 
-// AssignmentStat defines model for AssignmentStat.
-type AssignmentStat struct {
-	Assignments int    `json:"assignments"`
-	TeamName    string `json:"team_name"`
-	UserId      string `json:"user_id"`
-	Username    string `json:"username"`
+// AssignmentCountByPullRequest defines model for AssignmentCountByPullRequest.
+type AssignmentCountByPullRequest struct {
+	PullRequestId string `json:"pull_request_id"`
+	Reviewers     int64  `json:"reviewers"`
 }
 
-// AssignmentStatsResponse defines model for AssignmentStatsResponse.
-type AssignmentStatsResponse struct {
-	Stats []AssignmentStat `json:"stats"`
+// AssignmentCountByUser defines model for AssignmentCountByUser.
+type AssignmentCountByUser struct {
+	Assignments int64  `json:"assignments"`
+	UserId      string `json:"user_id"`
+}
+
+// AssignmentStats defines model for AssignmentStats.
+type AssignmentStats struct {
+	ByPullRequest []AssignmentCountByPullRequest `json:"by_pull_request"`
+	ByUser        []AssignmentCountByUser        `json:"by_user"`
 }
 
 // ErrorResponse defines model for ErrorResponse.
@@ -130,12 +134,6 @@ type PostPullRequestReassignJSONBody struct {
 	PullRequestId string `json:"pull_request_id"`
 }
 
-// GetStatsAssignmentsParams defines parameters for GetStatsAssignments.
-type GetStatsAssignmentsParams struct {
-	// Limit ����?�?�?�?�? amount of rows to return
-	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
-}
-
 // GetTeamGetParams defines parameters for GetTeamGet.
 type GetTeamGetParams struct {
 	// TeamName Уникальное имя команды
@@ -180,9 +178,9 @@ type ServerInterface interface {
 	// Переназначить конкретного ревьювера на другого из его команды
 	// (POST /pullRequest/reassign)
 	PostPullRequestReassign(w http.ResponseWriter, r *http.Request)
-	// �?�?�>��?�?�?�?��?�� �?�'���'��?�'���? �?�����?���ؐ�?���
+	// Получить статистику назначений ревьюеров по пользователям и pull request.
 	// (GET /stats/assignments)
-	GetStatsAssignments(w http.ResponseWriter, r *http.Request, params GetStatsAssignmentsParams)
+	GetStatsAssignments(w http.ResponseWriter, r *http.Request)
 	// Создать команду с участниками (создаёт/обновляет пользователей)
 	// (POST /team/add)
 	PostTeamAdd(w http.ResponseWriter, r *http.Request)
@@ -219,9 +217,9 @@ func (_ Unimplemented) PostPullRequestReassign(w http.ResponseWriter, r *http.Re
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// �?�?�>��?�?�?�?��?�� �?�'���'��?�'���? �?�����?���ؐ�?���
+// Получить статистику назначений ревьюеров по пользователям и pull request.
 // (GET /stats/assignments)
-func (_ Unimplemented) GetStatsAssignments(w http.ResponseWriter, r *http.Request, params GetStatsAssignmentsParams) {
+func (_ Unimplemented) GetStatsAssignments(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -303,21 +301,8 @@ func (siw *ServerInterfaceWrapper) PostPullRequestReassign(w http.ResponseWriter
 // GetStatsAssignments operation middleware
 func (siw *ServerInterfaceWrapper) GetStatsAssignments(w http.ResponseWriter, r *http.Request) {
 
-	var err error
-
-	// Parameter object where we will unmarshal all parameters from the context
-	var params GetStatsAssignmentsParams
-
-	// ------------- Optional query parameter "limit" -------------
-
-	err = runtime.BindQueryParameter("form", true, false, "limit", r.URL.Query(), &params.Limit)
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
-		return
-	}
-
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetStatsAssignments(w, r, params)
+		siw.Handler.GetStatsAssignments(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {

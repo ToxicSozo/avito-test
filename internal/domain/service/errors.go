@@ -3,7 +3,6 @@ package service
 import "errors"
 
 var (
-	ErrTeamExists        = errors.New("team already exists")
 	ErrUserExists        = errors.New("user already exists")
 	ErrPullRequestExists = errors.New("pull request already exists")
 	ErrPullRequestMerged = errors.New("pull request already merged")

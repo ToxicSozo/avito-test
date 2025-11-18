@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"gorm.io/gorm"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ToxicSozo/avito-test/internal/model"
 	"github.com/ToxicSozo/avito-test/internal/storage/postgres/repository"
@@ -17,18 +18,16 @@ const (
 )
 
 type Service struct {
-	repo *repository.Store
+	pool *pgxpool.Pool
 }
 
-func New(db *gorm.DB) *Service {
-	return &Service{
-		repo: repository.New(db),
-	}
+func New(pool *pgxpool.Pool) *Service {
+	return &Service{pool: pool}
 }
 
 func (s *Service) CreateTeam(ctx context.Context, team model.Team) (*model.Team, error) {
-	err := s.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		txRepo := repository.New(tx)
+	err := s.withTx(ctx, func(q repository.Querier) error {
+		txRepo := repository.New(q)
 
 		if err := txRepo.EnsureTeam(ctx, team.Name); err != nil {
 			return err
@@ -55,7 +54,7 @@ func (s *Service) CreateTeam(ctx context.Context, team model.Team) (*model.Team,
 }
 
 func (s *Service) GetTeam(ctx context.Context, teamName string) (*model.Team, error) {
-	team, err := s.repo.GetTeam(ctx, teamName)
+	team, err := repository.New(s.pool).GetTeam(ctx, teamName)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrNotFound
@@ -66,7 +65,7 @@ func (s *Service) GetTeam(ctx context.Context, teamName string) (*model.Team, er
 }
 
 func (s *Service) SetUserActivity(ctx context.Context, userID string, isActive bool) (*model.User, error) {
-	user, err := s.repo.SetUserActivity(ctx, userID, isActive)
+	user, err := repository.New(s.pool).SetUserActivity(ctx, userID, isActive)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrNotFound
@@ -77,8 +76,8 @@ func (s *Service) SetUserActivity(ctx context.Context, userID string, isActive b
 }
 
 func (s *Service) CreatePullRequest(ctx context.Context, prID, name, authorID string) (*model.PullRequest, error) {
-	err := s.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		txRepo := repository.New(tx)
+	err := s.withTx(ctx, func(q repository.Querier) error {
+		txRepo := repository.New(q)
 
 		teamName, err := txRepo.FindTeamName(ctx, authorID)
 		if err != nil {
@@ -109,24 +108,24 @@ func (s *Service) CreatePullRequest(ctx context.Context, prID, name, authorID st
 		return nil, err
 	}
 
-	return s.repo.GetPullRequest(ctx, prID)
+	return repository.New(s.pool).GetPullRequest(ctx, prID)
 }
 
 func (s *Service) MergePullRequest(ctx context.Context, prID string) (*model.PullRequest, error) {
-	rows, err := s.repo.MarkMerged(ctx, prID, statusMerged)
+	rows, err := repository.New(s.pool).MarkMerged(ctx, prID, statusMerged)
 	if err != nil {
 		return nil, err
 	}
 	if rows == 0 {
 		return nil, ErrNotFound
 	}
-	return s.repo.GetPullRequest(ctx, prID)
+	return repository.New(s.pool).GetPullRequest(ctx, prID)
 }
 
 func (s *Service) ReassignReviewer(ctx context.Context, prID, oldReviewerID string) (*model.PullRequest, string, error) {
 	var replacedBy string
-	err := s.repo.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		txRepo := repository.New(tx)
+	err := s.withTx(ctx, func(q repository.Querier) error {
+		txRepo := repository.New(q)
 
 		pr, err := txRepo.LockPullRequest(ctx, prID)
 		if err != nil {
@@ -174,7 +173,7 @@ func (s *Service) ReassignReviewer(ctx context.Context, prID, oldReviewerID stri
 		return nil, "", err
 	}
 
-	pr, err := s.repo.GetPullRequest(ctx, prID)
+	pr, err := repository.New(s.pool).GetPullRequest(ctx, prID)
 	if err != nil {
 		return nil, "", err
 	}
@@ -182,20 +181,33 @@ func (s *Service) ReassignReviewer(ctx context.Context, prID, oldReviewerID stri
 }
 
 func (s *Service) ListReviewerAssignments(ctx context.Context, userID string) ([]model.PullRequestShort, error) {
-	if err := s.repo.EnsureUserExists(ctx, userID); err != nil {
+	repo := repository.New(s.pool)
+	if err := repo.EnsureUserExists(ctx, userID); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrNotFound
 		}
 		return nil, err
 	}
-	return s.repo.ListAssignments(ctx, userID)
+	return repo.ListAssignments(ctx, userID)
 }
 
-func (s *Service) AssignmentStats(ctx context.Context, limit int) ([]model.AssignmentStat, error) {
-	if limit <= 0 {
-		limit = 50
+func (s *Service) GetAssignmentStats(ctx context.Context) (*model.AssignmentStats, error) {
+	return repository.New(s.pool).AssignmentStats(ctx)
+}
+
+func (s *Service) withTx(ctx context.Context, fn func(repository.Querier) error) error {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
 	}
-	return s.repo.AssignmentStats(ctx, limit)
+	defer func() {
+		_ = tx.Rollback(ctx) // safe to ignore error if already committed
+	}()
+
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func isUniqueViolation(err error) bool {

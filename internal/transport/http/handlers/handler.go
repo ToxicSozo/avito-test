@@ -13,11 +13,7 @@ import (
 	"github.com/ToxicSozo/avito-test/internal/model"
 )
 
-const (
-	maxRequestBodyBytes    int64 = 1 << 20
-	defaultAssignmentLimit       = 50
-	maxAssignmentLimit           = 500
-)
+const maxRequestBodyBytes int64 = 1 << 20
 
 type Handler struct {
 	teamSvc TeamService
@@ -55,7 +51,7 @@ type PullRequestService interface {
 	MergePullRequest(ctx context.Context, prID string) (*model.PullRequest, error)
 	ReassignReviewer(ctx context.Context, prID, oldReviewerID string) (*model.PullRequest, string, error)
 	ListReviewerAssignments(ctx context.Context, userID string) ([]model.PullRequestShort, error)
-	AssignmentStats(ctx context.Context, limit int) ([]model.AssignmentStat, error)
+	GetAssignmentStats(ctx context.Context) (*model.AssignmentStats, error)
 }
 
 var (
@@ -66,10 +62,8 @@ var (
 
 func (h *Handler) handleError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, service.ErrTeamExists):
-		writeJSONError(w, http.StatusBadRequest, api.TEAMEXISTS, "team already exists")
 	case errors.Is(err, service.ErrUserExists):
-		writeJSONError(w, http.StatusBadRequest, api.USEREXISTS, "user already exists")
+		writeJSONError(w, http.StatusBadRequest, api.TEAMEXISTS, "user already exists")
 	case errors.Is(err, service.ErrPullRequestExists):
 		writeJSONError(w, http.StatusConflict, api.PREXISTS, "pull request already exists")
 	case errors.Is(err, service.ErrPullRequestMerged):
@@ -97,17 +91,6 @@ func (h *Handler) logError(msg string, err error, keyvals ...any) {
 		entry = entry.WithFields(makeFields(keyvals...))
 	}
 	entry.Error(msg)
-}
-
-func (h *Handler) logWarn(msg string, keyvals ...any) {
-	if h.log == nil {
-		return
-	}
-	entry := h.log
-	if len(keyvals) > 0 {
-		entry = entry.WithFields(makeFields(keyvals...))
-	}
-	entry.Warn(msg)
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload interface{}) {

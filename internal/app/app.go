@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	nethttpmiddleware "github.com/oapi-codegen/nethttp-middleware"
-
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/sirupsen/logrus"
@@ -26,12 +24,7 @@ func Run(ctx context.Context, cfg *config.Config, log *logrus.Logger) error {
 	}
 	defer db.Close()
 
-	swagger, err := api.GetSwagger()
-	if err != nil {
-		return fmt.Errorf("load swagger: %w", err)
-	}
-
-	svc := service.New(db.Conn())
+	svc := service.New(db.Pool())
 
 	handlerImpl := httpHandlers.NewHandler(
 		svc,
@@ -47,7 +40,6 @@ func Run(ctx context.Context, cfg *config.Config, log *logrus.Logger) error {
 		middleware.Logger,
 		middleware.Recoverer,
 		middleware.Timeout(30*time.Second),
-		nethttpmiddleware.OapiRequestValidator(swagger),
 	)
 
 	router := api.HandlerWithOptions(handlerImpl, api.ChiServerOptions{
